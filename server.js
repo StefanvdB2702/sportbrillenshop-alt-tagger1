@@ -528,6 +528,22 @@ async function verwerk(productData) {
   const { metafields: huidigeMetavelden, sku, variantId } = await haalMetaveldenOp(productId, token);
   console.log(`🏷️  SKU: "${sku || "nog niet ingevuld"}"`);
 
+  // Check of het een skibril is — zo niet, stop hier
+  const titelLowerCheck = titel.toLowerCase();
+  const skibrilModellen = [
+    "fall line", "flight deck", "flight path",
+    "flight tracker", "flow scape", "line miner",
+    "mont scape", "target line"
+  ];
+  const isSkibrilProduct = skibrilModellen.some(model => titelLowerCheck.includes(model));
+
+  if (!isSkibrilProduct) {
+    console.log(`⏭️  Geen skibril — overgeslagen`);
+    return;
+  }
+
+  console.log(`✅ Skibril herkend — verwerken`);
+
   // Kleuren altijd bepalen uit titel (ook zonder SKU)
   const kleuren = bepaalKleuren(titel);
 
@@ -623,7 +639,7 @@ app.post("/webhook/product-updated", async (req, res) => {
 
 app.get("/", (req, res) => {
   res.send(`
-    <h1>✅ Sportbrillenshop Helper v16</h1>
+    <h1>✅ Sportbrillenshop Helper v17</h1>
     <p>${SHOPIFY_SHOP_DOMAIN ? "✅" : "❌"} ${SHOPIFY_SHOP_DOMAIN || "niet ingesteld"}</p>
     <p>${SHOPIFY_CLIENT_ID ? "✅" : "❌"} Client ID</p>
     <p>${SHOPIFY_CLIENT_SECRET ? "✅" : "❌"} Client Secret</p>
@@ -635,7 +651,7 @@ app.get("/", (req, res) => {
 
 const POORT = process.env.PORT || 3000;
 app.listen(POORT, () => {
-  console.log(`\n🚀 v16 gestart op poort ${POORT}`);
+  console.log(`\n🚀 v17 gestart op poort ${POORT}`);
   console.log(`🏪 ${SHOPIFY_SHOP_DOMAIN || "❌ niet ingesteld"}`);
   console.log(`🔑 ${SHOPIFY_CLIENT_ID ? "✅" : "❌"}\n`);
 });
