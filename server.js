@@ -528,7 +528,7 @@ async function verwerk(productData) {
   const { metafields: huidigeMetavelden, sku, variantId } = await haalMetaveldenOp(productId, token);
   console.log(`🏷️  SKU: "${sku || "nog niet ingevuld"}"`);
 
-  // Check of het een skibril is — zo niet, stop hier
+  // Check of het een skibril is (alleen voor metavelden)
   const titelLowerCheck = titel.toLowerCase();
   const skibrilModellen = [
     "fall line", "flight deck", "flight path",
@@ -536,18 +536,13 @@ async function verwerk(productData) {
     "mont scape", "target line"
   ];
   const isSkibrilProduct = skibrilModellen.some(model => titelLowerCheck.includes(model));
-
-  if (!isSkibrilProduct) {
-    console.log(`⏭️  Geen skibril — overgeslagen`);
-    return;
-  }
-
-  console.log(`✅ Skibril herkend — verwerken`);
+  console.log(`${isSkibrilProduct ? "✅ Skibril" : "⏭️  Geen skibril"} — foto's worden altijd verwerkt`);
 
   // Kleuren altijd bepalen uit titel (ook zonder SKU)
   const kleuren = bepaalKleuren(titel);
 
-  // Basis metavelden altijd instellen (ook zonder SKU)
+  // Metavelden alleen voor skibrillen
+  if (isSkibrilProduct) {
   const lensnaam = bepaalLensnaam(titel);
   const basisMetavelden = {
     "custom.prizm": titel.toLowerCase().includes("prizm") ? "ja" : "nee",
@@ -593,7 +588,9 @@ async function verwerk(productData) {
     console.log(`ℹ️  SKU ongewijzigd — GTIN/barcode niet overschreven`);
   }
 
-  // Foto's verwerken
+  } // einde metavelden if-blok
+
+  // Foto's verwerken — altijd voor alle producten
   const product = await haalFotos(productId, token);
   if (!product) { console.log("❌ Product niet gevonden"); return; }
 
@@ -639,7 +636,7 @@ app.post("/webhook/product-updated", async (req, res) => {
 
 app.get("/", (req, res) => {
   res.send(`
-    <h1>✅ Sportbrillenshop Helper v17</h1>
+    <h1>✅ Sportbrillenshop Helper v18</h1>
     <p>${SHOPIFY_SHOP_DOMAIN ? "✅" : "❌"} ${SHOPIFY_SHOP_DOMAIN || "niet ingesteld"}</p>
     <p>${SHOPIFY_CLIENT_ID ? "✅" : "❌"} Client ID</p>
     <p>${SHOPIFY_CLIENT_SECRET ? "✅" : "❌"} Client Secret</p>
@@ -651,7 +648,7 @@ app.get("/", (req, res) => {
 
 const POORT = process.env.PORT || 3000;
 app.listen(POORT, () => {
-  console.log(`\n🚀 v17 gestart op poort ${POORT}`);
+  console.log(`\n🚀 v18 gestart op poort ${POORT}`);
   console.log(`🏪 ${SHOPIFY_SHOP_DOMAIN || "❌ niet ingesteld"}`);
   console.log(`🔑 ${SHOPIFY_CLIENT_ID ? "✅" : "❌"}\n`);
 });
