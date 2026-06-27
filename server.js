@@ -12,8 +12,8 @@ const SHOPIFY_CLIENT_SECRET = process.env.SHOPIFY_CLIENT_SECRET;
 const SHOPIFY_SHOP_DOMAIN = process.env.SHOPIFY_SHOP_DOMAIN;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
-// URL naar het CSV bestand op GitHub
-const CSV_URL = "https://raw.githubusercontent.com/StefanvdB2702/sportbrillenshop-alt-tagger1/main/Goggles%202026.csv";
+// URL naar het Excel bestand op GitHub
+const EXCEL_URL = "https://raw.githubusercontent.com/StefanvdB2702/sportbrillenshop-alt-tagger1/main/Goggles%202026.xlsx";
 
 app.use(express.raw({ type: "application/json" }));
 
@@ -110,7 +110,7 @@ function vertaalSku(shopifySku) {
   return `${model}${kleur}00`; // 71490700
 }
 
-async function zoekInCsv(shopifySku) {
+async function zoekInExcel(shopifySku) {
   try {
     const excelCode = vertaalSku(shopifySku);
     if (!excelCode) {
@@ -120,31 +120,33 @@ async function zoekInCsv(shopifySku) {
 
     console.log(`  🔍 Zoek Excel code: ${excelCode} (van SKU: ${shopifySku})`);
 
-    const res = await fetch(CSV_URL);
+    const res = await fetch(EXCEL_URL);
     if (!res.ok) {
-      console.log(`  ❌ CSV ophalen mislukt: ${res.status}`);
+      console.log(`  ❌ Excel ophalen mislukt: ${res.status}`);
       return null;
     }
 
-    const tekst = await res.text();
-    const regels = tekst.split("\n");
+    const buffer = await res.arrayBuffer();
+    const XLSX = require('xlsx');
+    const wb = XLSX.read(buffer, { type: 'buffer' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rijen = XLSX.utils.sheet_to_json(ws, { header: 1 });
 
-    for (const regel of regels) {
-      const kolommen = regel.split(",");
+    for (const rij of rijen) {
       // Kolom 10 (index 9) is de SKU kleurcode (bijv. 71490700)
-      if (kolommen[9] && kolommen[9].trim() === excelCode) {
+      if (rij[9] && String(rij[9]).trim() === excelCode) {
         return {
-          gtin: kolommen[0]?.trim(),           // Kolom 1: GTIN
-          framekleur: kolommen[14]?.trim(),     // Kolom 15: Framekleur
-          lenskleur: kolommen[15]?.trim(),      // Kolom 16: Lenskleur
+          gtin: String(rij[0] || "").trim(),     // Kolom 1: GTIN
+          framekleur: String(rij[14] || "").trim(), // Kolom 15: Framekleur
+          lenskleur: String(rij[15] || "").trim(),  // Kolom 16: Lenskleur
         };
       }
     }
 
-    console.log(`  ⚠️ SKU niet gevonden in CSV: ${excelCode}`);
+    console.log(`  ⚠️ SKU niet gevonden in Excel: ${excelCode}`);
     return null;
   } catch (fout) {
-    console.log(`  ❌ Fout bij CSV lezen: ${fout.message}`);
+    console.log(`  ❌ Fout bij Excel lezen: ${fout.message}`);
     return null;
   }
 }
@@ -434,7 +436,7 @@ async function verwerk(productData) {
   // Metavelden alleen bijwerken als SKU ingevuld is
   if (sku && sku.trim() !== "") {
     // Zoek product op in CSV
-    const csvData = await zoekInCsv(sku);
+    const csvData = await zoekInExcel(sku);
 
     // Bepaal nieuwe metavelden
     const nieuweMetavelden = bepaalMetavelden(titel, csvData);
