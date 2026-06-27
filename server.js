@@ -1,6 +1,6 @@
 // ============================================================
 // Sportbrillenshop - Alt Tag + Bestandsnaam + Metavelden Updater
-// Versie 10 - met automatische metavelden op basis van SKU
+// Versie 11 - met barcode + custom.artikelnummer
 // ============================================================
 
 const express = require("express");
@@ -235,6 +235,7 @@ async function haalMetaveldenOp(productId, token) {
         variants(first: 1) {
           edges {
             node {
+              id
               sku
             }
           }
@@ -250,7 +251,8 @@ async function haalMetaveldenOp(productId, token) {
   }
 
   const sku = data.data?.product?.variants?.edges?.[0]?.node?.sku || "";
-  return { metafields, sku };
+  const variantId = data.data?.product?.variants?.edges?.[0]?.node?.id || "";
+  return { metafields, sku, variantId };
 }
 
 // ============================================================
@@ -290,6 +292,62 @@ async function stelMetaveldenIn(productId, metavelden, token) {
     console.log(`  ❌ Metavelden fout: ${fouten[0].message}`);
   } else {
     console.log(`  ✅ ${metafieldsInput.length} metavelden ingesteld`);
+  }
+}
+
+// ============================================================
+// BARCODE + ARTIKELNUMMER INSTELLEN
+// ============================================================
+async function stelBarcodeEnArtikelnummerIn(productId, variantId, sku, gtin, token) {
+  // Stel custom.artikelnummer in als metaveld
+  const metaveldData = await graphql(`
+    mutation($input: ProductInput!) {
+      productUpdate(input: $input) {
+        product { id }
+        userErrors { field message }
+      }
+    }
+  `, {
+    input: {
+      id: productId,
+      metafields: [{
+        namespace: "custom",
+        key: "artikelnummer",
+        value: sku,
+        type: "single_line_text_field"
+      }]
+    }
+  }, token);
+
+  const metaveldFouten = metaveldData.data?.productUpdate?.userErrors || [];
+  if (metaveldFouten.length > 0) {
+    console.log(`  ❌ Artikelnummer fout: ${metaveldFouten[0].message}`);
+  } else {
+    console.log(`  ✅ custom.artikelnummer: "${sku}"`);
+  }
+
+  // Stel barcode (GTIN) in op de variant
+  if (gtin && variantId) {
+    const barcodeData = await graphql(`
+      mutation($input: ProductVariantInput!) {
+        productVariantUpdate(input: $input) {
+          productVariant { id barcode }
+          userErrors { field message }
+        }
+      }
+    `, {
+      input: {
+        id: variantId,
+        barcode: gtin
+      }
+    }, token);
+
+    const barcodeFouten = barcodeData.data?.productVariantUpdate?.userErrors || [];
+    if (barcodeFouten.length > 0) {
+      console.log(`  ❌ Barcode fout: ${barcodeFouten[0].message}`);
+    } else {
+      console.log(`  ✅ Barcode (GTIN): "${gtin}"`);
+    }
   }
 }
 
@@ -369,8 +427,8 @@ async function verwerk(productData) {
   // Wacht 3 seconden zodat Shopify alles verwerkt heeft
   await new Promise(r => setTimeout(r, 3000));
 
-  // Haal huidige SKU en metavelden op
-  const { metafields: huidigeMetavelden, sku } = await haalMetaveldenOp(productId, token);
+  // Haal huidige SKU, variantId en metavelden op
+  const { metafields: huidigeMetavelden, sku, variantId } = await haalMetaveldenOp(productId, token);
   console.log(`🏷️  SKU: "${sku || "nog niet ingevuld"}"`);
 
   // Metavelden alleen bijwerken als SKU ingevuld is
@@ -387,6 +445,9 @@ async function verwerk(productData) {
     }
 
     await stelMetaveldenIn(productId, nieuweMetavelden, token);
+
+    // Stel barcode (GTIN) en artikelnummer in
+    await stelBarcodeEnArtikelnummerIn(productId, variantId, sku, csvData?.gtin, token);
   } else {
     console.log(`ℹ️  Geen SKU — metavelden worden ingesteld zodra SKU wordt ingevoerd`);
   }
@@ -437,7 +498,7 @@ app.post("/webhook/product-updated", async (req, res) => {
 
 app.get("/", (req, res) => {
   res.send(`
-    <h1>✅ Sportbrillenshop Helper v10</h1>
+    <h1>✅ Sportbrillenshop Helper v11</h1>
     <p>${SHOPIFY_SHOP_DOMAIN ? "✅" : "❌"} ${SHOPIFY_SHOP_DOMAIN || "niet ingesteld"}</p>
     <p>${SHOPIFY_CLIENT_ID ? "✅" : "❌"} Client ID</p>
     <p>${SHOPIFY_CLIENT_SECRET ? "✅" : "❌"} Client Secret</p>
@@ -449,7 +510,7 @@ app.get("/", (req, res) => {
 
 const POORT = process.env.PORT || 3000;
 app.listen(POORT, () => {
-  console.log(`\n🚀 v10 gestart op poort ${POORT}`);
+  console.log(`\n🚀 v11 gestart op poort ${POORT}`);
   console.log(`🏪 ${SHOPIFY_SHOP_DOMAIN || "❌ niet ingesteld"}`);
   console.log(`🔑 ${SHOPIFY_CLIENT_ID ? "✅" : "❌"}\n`);
 });
