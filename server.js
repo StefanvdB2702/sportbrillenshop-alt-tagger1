@@ -330,21 +330,23 @@ async function stelBarcodeEnArtikelnummerIn(productId, variantId, sku, gtin, tok
 
   // Stel barcode (GTIN) in op de variant
   if (gtin && variantId) {
+    const productGid = productId; // gid://shopify/Product/xxx
     const barcodeData = await graphql(`
-      mutation($input: ProductVariantInput!) {
-        productVariantUpdate(input: $input) {
-          productVariant { id barcode }
+      mutation($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+        productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+          productVariants { id barcode }
           userErrors { field message }
         }
       }
     `, {
-      input: {
+      productId: productGid,
+      variants: [{
         id: variantId,
         barcode: gtin
-      }
+      }]
     }, token);
 
-    const barcodeFouten = barcodeData.data?.productVariantUpdate?.userErrors || [];
+    const barcodeFouten = barcodeData.data?.productVariantsBulkUpdate?.userErrors || [];
     if (barcodeFouten.length > 0) {
       console.log(`  ❌ Barcode fout: ${barcodeFouten[0].message}`);
     } else {
@@ -433,8 +435,16 @@ async function verwerk(productData) {
   const { metafields: huidigeMetavelden, sku, variantId } = await haalMetaveldenOp(productId, token);
   console.log(`🏷️  SKU: "${sku || "nog niet ingevuld"}"`);
 
-  // Metavelden alleen bijwerken als SKU ingevuld is
-  if (sku && sku.trim() !== "") {
+  // Metavelden alleen bijwerken als SKU ingevuld is EN veranderd is
+  // We vergelijken de huidige SKU met custom.artikelnummer
+  // Als ze verschillen → SKU is nieuw of gewijzigd → alles overschrijven
+  const vorigeArtikelnummer = huidigeMetavelden["custom.artikelnummer"] || "";
+  const skuIsGewijzigd = sku && sku.trim() !== "" && sku.trim() !== vorigeArtikelnummer.trim();
+
+  console.log(`🔄 Vorige artikelnummer: "${vorigeArtikelnummer}" → Nieuw: "${sku}"`);
+  console.log(`🔄 SKU gewijzigd: ${skuIsGewijzigd ? "ja" : "nee"}`);
+
+  if (skuIsGewijzigd) {
     // Zoek product op in CSV
     const csvData = await zoekInExcel(sku);
 
@@ -450,8 +460,10 @@ async function verwerk(productData) {
 
     // Stel barcode (GTIN) en artikelnummer in
     await stelBarcodeEnArtikelnummerIn(productId, variantId, sku, csvData?.gtin, token);
-  } else {
+  } else if (!sku || sku.trim() === "") {
     console.log(`ℹ️  Geen SKU — metavelden worden ingesteld zodra SKU wordt ingevoerd`);
+  } else {
+    console.log(`ℹ️  SKU ongewijzigd — metavelden worden niet overschreven`);
   }
 
   // Foto's verwerken
@@ -500,7 +512,7 @@ app.post("/webhook/product-updated", async (req, res) => {
 
 app.get("/", (req, res) => {
   res.send(`
-    <h1>✅ Sportbrillenshop Helper v11</h1>
+    <h1>✅ Sportbrillenshop Helper v13</h1>
     <p>${SHOPIFY_SHOP_DOMAIN ? "✅" : "❌"} ${SHOPIFY_SHOP_DOMAIN || "niet ingesteld"}</p>
     <p>${SHOPIFY_CLIENT_ID ? "✅" : "❌"} Client ID</p>
     <p>${SHOPIFY_CLIENT_SECRET ? "✅" : "❌"} Client Secret</p>
@@ -512,7 +524,7 @@ app.get("/", (req, res) => {
 
 const POORT = process.env.PORT || 3000;
 app.listen(POORT, () => {
-  console.log(`\n🚀 v11 gestart op poort ${POORT}`);
+  console.log(`\n🚀 v13 gestart op poort ${POORT}`);
   console.log(`🏪 ${SHOPIFY_SHOP_DOMAIN || "❌ niet ingesteld"}`);
   console.log(`🔑 ${SHOPIFY_CLIENT_ID ? "✅" : "❌"}\n`);
 });
