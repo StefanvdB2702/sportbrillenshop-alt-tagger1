@@ -1,6 +1,6 @@
 // ============================================================
-// Sportbrillenshop - Alt Tag + Bestandsnaam Updater
-// Versie 10 - bestandsnamen krijgen oplopend nummer foto's zonder alt tag worden aangepast
+// Sportbrillenshop - Alt Tag + Bestandsnaam + Metavelden Updater
+// Versie 10 - met automatische metavelden op basis van SKU
 // ============================================================
 
 const express = require("express");
@@ -12,7 +12,37 @@ const SHOPIFY_CLIENT_SECRET = process.env.SHOPIFY_CLIENT_SECRET;
 const SHOPIFY_SHOP_DOMAIN = process.env.SHOPIFY_SHOP_DOMAIN;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
+// URL naar het CSV bestand op GitHub
+const CSV_URL = "https://raw.githubusercontent.com/StefanvdB2702/sportbrillenshop-alt-tagger1/main/Goggles%202026.csv";
+
 app.use(express.raw({ type: "application/json" }));
+
+// ============================================================
+// LICHTDOORLAATBAARHEID SKIBRILLEN
+// Voeg hier later andere modellen toe
+// ============================================================
+const SKIBRIL_MODELLEN = [
+  "fall line", "flight deck", "flight deck pro", "flight path",
+  "flight tracker", "flow scape", "line miner", "line miner pro",
+  "mont scape", "target line"
+];
+
+const LENS_DATA_SKIBRIL = {
+  "sapphire":   { lichtdoorlaatbaarheid: "13%", categorie: "3" },
+  "torch":      { lichtdoorlaatbaarheid: "17%", categorie: "2" },
+  "clear":      { lichtdoorlaatbaarheid: "64%", categorie: "1" },
+  "garnet":     { lichtdoorlaatbaarheid: "19%", categorie: "2" },
+  "sage gold":  { lichtdoorlaatbaarheid: "14%", categorie: "3" },
+  "rose gold":  { lichtdoorlaatbaarheid: "13%", categorie: "3" },
+  "argon":      { lichtdoorlaatbaarheid: "14%", categorie: "3" },
+  "persimmon":  { lichtdoorlaatbaarheid: "39%", categorie: "2" },
+  "24k":        { lichtdoorlaatbaarheid: "12%", categorie: "3" },
+  "iced":       { lichtdoorlaatbaarheid: "38%", categorie: "2" },
+  "black":      { lichtdoorlaatbaarheid: "5.5%", categorie: "4" },
+  "dark grey":  { lichtdoorlaatbaarheid: "11%", categorie: "3" },
+  "hi pink":    { lichtdoorlaatbaarheid: "46%", categorie: "1" },
+  // Voeg hier later andere modellen toe
+};
 
 // ============================================================
 // TOKEN
@@ -67,7 +97,204 @@ async function graphql(query, variables, token) {
 }
 
 // ============================================================
-// STAP 1: Foto's ophalen van product inclusief alt tag
+// CSV LEZEN
+// Vertaal Shopify SKU (OO7149-07) naar Excel code (71490700)
+// ============================================================
+function vertaalSku(shopifySku) {
+  // OO7149-07 → verwijder OO → 7149-07 → verwijder - → 714907 → voeg 00 toe → 71490700
+  const zonder_oo = shopifySku.replace(/^OO/i, "");
+  const delen = zonder_oo.split("-");
+  if (delen.length !== 2) return null;
+  const model = delen[0]; // 7149
+  const kleur = delen[1].padStart(2, "0"); // 07
+  return `${model}${kleur}00`; // 71490700
+}
+
+async function zoekInCsv(shopifySku) {
+  try {
+    const excelCode = vertaalSku(shopifySku);
+    if (!excelCode) {
+      console.log(`  ⚠️ SKU formaat niet herkend: ${shopifySku}`);
+      return null;
+    }
+
+    console.log(`  🔍 Zoek Excel code: ${excelCode} (van SKU: ${shopifySku})`);
+
+    const res = await fetch(CSV_URL);
+    if (!res.ok) {
+      console.log(`  ❌ CSV ophalen mislukt: ${res.status}`);
+      return null;
+    }
+
+    const tekst = await res.text();
+    const regels = tekst.split("\n");
+
+    for (const regel of regels) {
+      const kolommen = regel.split(",");
+      // Kolom 10 (index 9) is de SKU kleurcode (bijv. 71490700)
+      if (kolommen[9] && kolommen[9].trim() === excelCode) {
+        return {
+          gtin: kolommen[0]?.trim(),           // Kolom 1: GTIN
+          framekleur: kolommen[14]?.trim(),     // Kolom 15: Framekleur
+          lenskleur: kolommen[15]?.trim(),      // Kolom 16: Lenskleur
+        };
+      }
+    }
+
+    console.log(`  ⚠️ SKU niet gevonden in CSV: ${excelCode}`);
+    return null;
+  } catch (fout) {
+    console.log(`  ❌ Fout bij CSV lezen: ${fout.message}`);
+    return null;
+  }
+}
+
+// ============================================================
+// METAVELDEN BEPALEN UIT PRODUCTTITEL + CSV
+// ============================================================
+function bepaalMetavelden(titel, csvData) {
+  const titelLower = titel.toLowerCase();
+
+  // Maat bepalen (XM = M, XL = L)
+  let maat = "";
+  if (/ xl\b| xm\b/.test(titelLower)) {
+    maat = / xl\b/.test(titelLower) ? "L" : "M";
+  } else if (/ l\b/.test(titelLower)) {
+    maat = "L";
+  } else if (/ m\b/.test(titelLower)) {
+    maat = "M";
+  } else if (/ s\b/.test(titelLower)) {
+    maat = "S";
+  }
+
+  // Prizm bepalen
+  const prizm = titelLower.includes("prizm") ? "ja" : "nee";
+
+  // Transition bepalen
+  const transition = (titelLower.includes("photochromic") || titelLower.includes("photochromatisch")) ? "ja" : "nee";
+
+  // Gepolariseerd bepalen
+  const polarized = titelLower.includes("polarized") ? "ja" : "nee";
+
+  // Merk = eerste woord van de titel
+  const merk = titel.split(" ")[0];
+
+  // Lichtdoorlaatbaarheid + categorie bepalen
+  let lichtdoorlaatbaarheid = "";
+  let categorieLens = "";
+
+  const isSkibril = SKIBRIL_MODELLEN.some(model => titelLower.includes(model));
+
+  if (isSkibril && csvData?.lenskleur) {
+    const lensLower = csvData.lenskleur.toLowerCase()
+      .replace("prizm snow ", "")
+      .replace("prizm ", "")
+      .replace(" iridium", "")
+      .trim();
+
+    console.log(`  🔍 Lenskleur zoeken: "${lensLower}"`);
+
+    for (const [sleutel, waarde] of Object.entries(LENS_DATA_SKIBRIL)) {
+      if (lensLower.includes(sleutel)) {
+        lichtdoorlaatbaarheid = waarde.lichtdoorlaatbaarheid;
+        categorieLens = waarde.categorie;
+        break;
+      }
+    }
+  }
+
+  return {
+    "custom.size": maat,
+    "custom.prizm": prizm,
+    "custom.transition": transition,
+    "custom.polarized": polarized,
+    "custom.brand": merk,
+    "custom.gender": "unisex",
+    "custom.materiaal": lichtdoorlaatbaarheid,
+    "custom.categorie_lens": categorieLens,
+    "custom.gtin": csvData?.gtin || "",
+  };
+}
+
+// ============================================================
+// METAVELDEN OPHALEN UIT SHOPIFY
+// ============================================================
+async function haalMetaveldenOp(productId, token) {
+  const data = await graphql(`
+    query($id: ID!) {
+      product(id: $id) {
+        metafields(first: 20) {
+          edges {
+            node {
+              namespace
+              key
+              value
+            }
+          }
+        }
+        variants(first: 1) {
+          edges {
+            node {
+              sku
+            }
+          }
+        }
+      }
+    }
+  `, { id: productId }, token);
+
+  const metafields = {};
+  const edges = data.data?.product?.metafields?.edges || [];
+  for (const { node } of edges) {
+    metafields[`${node.namespace}.${node.key}`] = node.value;
+  }
+
+  const sku = data.data?.product?.variants?.edges?.[0]?.node?.sku || "";
+  return { metafields, sku };
+}
+
+// ============================================================
+// METAVELDEN INSTELLEN IN SHOPIFY
+// ============================================================
+async function stelMetaveldenIn(productId, metavelden, token) {
+  const metafieldsInput = Object.entries(metavelden)
+    .filter(([_, waarde]) => waarde !== "") // Lege waarden overslaan
+    .map(([sleutel, waarde]) => {
+      const [namespace, key] = sleutel.split(".");
+      return {
+        namespace,
+        key,
+        value: waarde,
+        type: "single_line_text_field"
+      };
+    });
+
+  if (metafieldsInput.length === 0) return;
+
+  const data = await graphql(`
+    mutation($input: ProductInput!) {
+      productUpdate(input: $input) {
+        product { id }
+        userErrors { field message }
+      }
+    }
+  `, {
+    input: {
+      id: productId,
+      metafields: metafieldsInput
+    }
+  }, token);
+
+  const fouten = data.data?.productUpdate?.userErrors || [];
+  if (fouten.length > 0) {
+    console.log(`  ❌ Metavelden fout: ${fouten[0].message}`);
+  } else {
+    console.log(`  ✅ ${metafieldsInput.length} metavelden ingesteld`);
+  }
+}
+
+// ============================================================
+// FOTO'S VERWERKEN
 // ============================================================
 async function haalFotos(productId, token) {
   const data = await graphql(`
@@ -92,9 +319,6 @@ async function haalFotos(productId, token) {
   return data.data?.product;
 }
 
-// ============================================================
-// STAP 2: Alt tag aanpassen
-// ============================================================
 async function pasAltAan(productId, mediaId, naam, token) {
   const data = await graphql(`
     mutation($productId: ID!, $media: [UpdateMediaInput!]!) {
@@ -104,25 +328,17 @@ async function pasAltAan(productId, mediaId, naam, token) {
       }
     }
   `, { productId, media: [{ id: mediaId, alt: naam }] }, token);
-
   const fouten = data.data?.productUpdateMedia?.mediaUserErrors || [];
-  if (fouten.length > 0) {
-    console.log(`  ❌ Alt tag fout: ${fouten[0].message}`);
-    return false;
-  }
+  if (fouten.length > 0) { console.log(`  ❌ Alt tag fout: ${fouten[0].message}`); return false; }
   console.log(`  ✅ Alt tag: "${naam}"`);
   return true;
 }
 
-// ============================================================
-// STAP 3: Bestandsnaam aanpassen
-// ============================================================
 async function pasBestandsnaamAan(mediaId, naam, mimeType, token) {
   let ext = ".jpg";
   if (mimeType === "image/png") ext = ".png";
   else if (mimeType === "image/webp") ext = ".webp";
   else if (mimeType === "image/gif") ext = ".gif";
-
   const data = await graphql(`
     mutation($files: [FileUpdateInput!]!) {
       fileUpdate(files: $files) {
@@ -131,12 +347,8 @@ async function pasBestandsnaamAan(mediaId, naam, mimeType, token) {
       }
     }
   `, { files: [{ id: mediaId, filename: `${naam}${ext}` }] }, token);
-
   const fouten = data.data?.fileUpdate?.userErrors || [];
-  if (fouten.length > 0) {
-    console.log(`  ❌ Bestandsnaam fout: ${fouten[0].message} (${fouten[0].code})`);
-    return false;
-  }
+  if (fouten.length > 0) { console.log(`  ❌ Bestandsnaam fout: ${fouten[0].message}`); return false; }
   console.log(`  ✅ Bestandsnaam: "${naam}${ext}"`);
   return true;
 }
@@ -150,75 +362,77 @@ async function verwerk(productData) {
   const naam = maakNaam(titel);
 
   console.log(`\n🛍️  Product: "${titel}"`);
-  console.log(`📝 Wordt: "${naam}"`);
+  console.log(`📝 Naam wordt: "${naam}"`);
 
   const token = await haalToken();
 
-  // Wacht 3 seconden zodat Shopify foto's verwerkt heeft
+  // Wacht 3 seconden zodat Shopify alles verwerkt heeft
   await new Promise(r => setTimeout(r, 3000));
 
+  // Haal huidige SKU en metavelden op
+  const { metafields: huidigeMetavelden, sku } = await haalMetaveldenOp(productId, token);
+  console.log(`🏷️  SKU: "${sku || "nog niet ingevuld"}"`);
+
+  // Metavelden alleen bijwerken als SKU ingevuld is
+  if (sku && sku.trim() !== "") {
+    // Zoek product op in CSV
+    const csvData = await zoekInCsv(sku);
+
+    // Bepaal nieuwe metavelden
+    const nieuweMetavelden = bepaalMetavelden(titel, csvData);
+
+    console.log(`\n📋 Metavelden instellen:`);
+    for (const [sleutel, waarde] of Object.entries(nieuweMetavelden)) {
+      if (waarde) console.log(`  → ${sleutel}: "${waarde}"`);
+    }
+
+    await stelMetaveldenIn(productId, nieuweMetavelden, token);
+  } else {
+    console.log(`ℹ️  Geen SKU — metavelden worden ingesteld zodra SKU wordt ingevoerd`);
+  }
+
+  // Foto's verwerken
   const product = await haalFotos(productId, token);
   if (!product) { console.log("❌ Product niet gevonden"); return; }
 
   const fotos = product.media?.edges || [];
-  console.log(`📸 ${fotos.length} foto('s) gevonden`);
-  if (fotos.length === 0) { console.log("ℹ️  Geen foto's — wordt opgepakt zodra foto's worden toegevoegd"); return; }
+  console.log(`\n📸 ${fotos.length} foto('s) gevonden`);
+  if (fotos.length === 0) { console.log("ℹ️  Geen foto's"); return; }
 
   let gelukt = 0;
   let overgeslagen = 0;
 
   for (const { node: foto } of fotos) {
     if (foto.mediaContentType !== "IMAGE") continue;
-
     console.log(`\n  🖼️  Foto: ${foto.id}`);
     console.log(`  📌 Huidige alt tag: "${foto.alt || "(leeg)"}"`);
-
-    // ============================================================
-    // SLIMME CHECK: alleen foto's zonder alt tag worden aangepast
-    // Als een foto al een alt tag heeft → is hij al eerder verwerkt
-    // of wordt hij door meerdere producten gebruikt → overslaan!
-    // ============================================================
     if (foto.alt && foto.alt.trim() !== "") {
       console.log(`  ⏭️  Overgeslagen — heeft al een alt tag`);
       overgeslagen++;
       continue;
     }
-
     await pasAltAan(productId, foto.id, naam, token);
-    // Eerste foto krijgt gewoon de naam, daarna -2, -3, etc.
     const bestandsnaam = gelukt === 0 ? naam : `${naam}-${gelukt + 1}`;
     await pasBestandsnaamAan(foto.id, bestandsnaam, foto.mimeType, token);
     gelukt++;
   }
 
-  console.log(`\n🎉 ${gelukt} bijgewerkt, ${overgeslagen} overgeslagen voor "${titel}"`);
+  console.log(`\n🎉 Klaar! ${gelukt} foto('s) bijgewerkt, ${overgeslagen} overgeslagen voor "${titel}"`);
 }
 
 // ============================================================
 // WEBHOOKS
 // ============================================================
 app.post("/webhook/product-created", async (req, res) => {
-  if (!isEchtShopify(req.body, req.headers["x-shopify-hmac-sha256"])) {
-    return res.status(401).send("Ongeautoriseerd");
-  }
+  if (!isEchtShopify(req.body, req.headers["x-shopify-hmac-sha256"])) return res.status(401).send("Ongeautoriseerd");
   res.status(200).send("Ontvangen!");
-  try {
-    await verwerk(JSON.parse(req.body.toString()));
-  } catch (e) {
-    console.error("❌ Fout:", e.message);
-  }
+  try { await verwerk(JSON.parse(req.body.toString())); } catch (e) { console.error("❌ Fout:", e.message); }
 });
 
 app.post("/webhook/product-updated", async (req, res) => {
-  if (!isEchtShopify(req.body, req.headers["x-shopify-hmac-sha256"])) {
-    return res.status(401).send("Ongeautoriseerd");
-  }
+  if (!isEchtShopify(req.body, req.headers["x-shopify-hmac-sha256"])) return res.status(401).send("Ongeautoriseerd");
   res.status(200).send("Ontvangen!");
-  try {
-    await verwerk(JSON.parse(req.body.toString()));
-  } catch (e) {
-    console.error("❌ Fout:", e.message);
-  }
+  try { await verwerk(JSON.parse(req.body.toString())); } catch (e) { console.error("❌ Fout:", e.message); }
 });
 
 app.get("/", (req, res) => {
