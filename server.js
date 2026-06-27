@@ -136,9 +136,10 @@ async function zoekInExcel(shopifySku) {
       // Kolom 10 (index 9) is de SKU kleurcode (bijv. 71490700)
       if (rij[9] && String(rij[9]).trim() === excelCode) {
         return {
-          gtin: String(rij[0] || "").trim(),     // Kolom 1: GTIN
-          framekleur: String(rij[14] || "").trim(), // Kolom 15: Framekleur
-          lenskleur: String(rij[15] || "").trim(),  // Kolom 16: Lenskleur
+          gtin: String(rij[0] || "").trim(),           // Kolom 1: GTIN
+          vergelijkingsprijs: String(rij[3] || "").trim(), // Kolom 4: Vergelijkingsprijs
+          framekleur: String(rij[14] || "").trim(),    // Kolom 15: Framekleur
+          lenskleur: String(rij[15] || "").trim(),     // Kolom 16: Lenskleur
         };
       }
     }
@@ -300,7 +301,7 @@ async function stelMetaveldenIn(productId, metavelden, token) {
 // ============================================================
 // BARCODE + ARTIKELNUMMER INSTELLEN
 // ============================================================
-async function stelBarcodeEnArtikelnummerIn(productId, variantId, sku, gtin, token) {
+async function stelBarcodeEnArtikelnummerIn(productId, variantId, sku, gtin, vergelijkingsprijs, token) {
   // Stel custom.artikelnummer in als metaveld
   const metaveldData = await graphql(`
     mutation($input: ProductInput!) {
@@ -331,26 +332,29 @@ async function stelBarcodeEnArtikelnummerIn(productId, variantId, sku, gtin, tok
   // Stel barcode (GTIN) in op de variant
   if (gtin && variantId) {
     const productGid = productId; // gid://shopify/Product/xxx
+    const variantInput = { id: variantId, barcode: gtin };
+    if (vergelijkingsprijs) {
+      variantInput.compareAtPrice = vergelijkingsprijs;
+    }
+
     const barcodeData = await graphql(`
       mutation($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
         productVariantsBulkUpdate(productId: $productId, variants: $variants) {
-          productVariants { id barcode }
+          productVariants { id barcode compareAtPrice }
           userErrors { field message }
         }
       }
     `, {
       productId: productGid,
-      variants: [{
-        id: variantId,
-        barcode: gtin
-      }]
+      variants: [variantInput]
     }, token);
 
     const barcodeFouten = barcodeData.data?.productVariantsBulkUpdate?.userErrors || [];
     if (barcodeFouten.length > 0) {
-      console.log(`  ❌ Barcode fout: ${barcodeFouten[0].message}`);
+      console.log(`  ❌ Barcode/prijs fout: ${barcodeFouten[0].message}`);
     } else {
       console.log(`  ✅ Barcode (GTIN): "${gtin}"`);
+      if (vergelijkingsprijs) console.log(`  ✅ Vergelijkingsprijs: "€${vergelijkingsprijs}"`);
     }
   }
 }
@@ -459,7 +463,7 @@ async function verwerk(productData) {
     await stelMetaveldenIn(productId, nieuweMetavelden, token);
 
     // Stel barcode (GTIN) en artikelnummer in
-    await stelBarcodeEnArtikelnummerIn(productId, variantId, sku, csvData?.gtin, token);
+    await stelBarcodeEnArtikelnummerIn(productId, variantId, sku, csvData?.gtin, csvData?.vergelijkingsprijs, token);
   } else if (!sku || sku.trim() === "") {
     console.log(`ℹ️  Geen SKU — metavelden worden ingesteld zodra SKU wordt ingevoerd`);
   } else {
@@ -512,7 +516,7 @@ app.post("/webhook/product-updated", async (req, res) => {
 
 app.get("/", (req, res) => {
   res.send(`
-    <h1>✅ Sportbrillenshop Helper v13</h1>
+    <h1>✅ Sportbrillenshop Helper v14</h1>
     <p>${SHOPIFY_SHOP_DOMAIN ? "✅" : "❌"} ${SHOPIFY_SHOP_DOMAIN || "niet ingesteld"}</p>
     <p>${SHOPIFY_CLIENT_ID ? "✅" : "❌"} Client ID</p>
     <p>${SHOPIFY_CLIENT_SECRET ? "✅" : "❌"} Client Secret</p>
@@ -524,7 +528,7 @@ app.get("/", (req, res) => {
 
 const POORT = process.env.PORT || 3000;
 app.listen(POORT, () => {
-  console.log(`\n🚀 v13 gestart op poort ${POORT}`);
+  console.log(`\n🚀 v14 gestart op poort ${POORT}`);
   console.log(`🏪 ${SHOPIFY_SHOP_DOMAIN || "❌ niet ingesteld"}`);
   console.log(`🔑 ${SHOPIFY_CLIENT_ID ? "✅" : "❌"}\n`);
 });
