@@ -307,6 +307,43 @@ function bepaalKleuren(titel) {
 }
 
 // ============================================================
+// LENSNAAM BEPALEN UIT TITEL (met hoofdletters, alleen eerste lens)
+// ============================================================
+function bepaalLensnaam(titel) {
+  const delen = titel.split("/");
+  const lensDeel = delen[1] || "";
+
+  // Neem alleen de eerste lens (voor de &)
+  const eersteLens = lensDeel.split("&")[0].trim();
+
+  if (!eersteLens) return "";
+
+  // Verwijder "Snow" en "Iridium" en "Polarized" want die zijn geen onderdeel van de lensnaam filter
+  // Maar behoud de rest met hoofdletters
+  let lensnaam = eersteLens
+    .replace(/ Snow /gi, " ")
+    .replace(/ Snow$/gi, "")
+    .replace(/ Iridium$/gi, "")
+    .replace(/ Iridium /gi, " ")
+    .replace(/ Polarized$/gi, "")
+    .trim();
+
+  // Zorg voor correcte hoofdletters (eerste letter van elk woord)
+  lensnaam = lensnaam.split(" ")
+    .map(woord => woord.charAt(0).toUpperCase() + woord.slice(1).toLowerCase())
+    .join(" ");
+
+  // Speciale gevallen met hoofdletters herstellen
+  lensnaam = lensnaam
+    .replace(/Prizm/gi, "Prizm")
+    .replace(/24k/gi, "24K")
+    .replace(/Hi/gi, "Hi");
+
+  console.log(`  🔍 Lensnaam: "${lensnaam}"`);
+  return lensnaam;
+}
+
+// ============================================================
 // METAVELDEN BEPALEN
 // ============================================================
 function bepaalMetavelden(titel, csvData, kleuren) {
@@ -495,6 +532,7 @@ async function verwerk(productData) {
   const kleuren = bepaalKleuren(titel);
 
   // Basis metavelden altijd instellen (ook zonder SKU)
+  const lensnaam = bepaalLensnaam(titel);
   const basisMetavelden = {
     "custom.prizm": titel.toLowerCase().includes("prizm") ? "ja" : "nee",
     "custom.transition": (titel.toLowerCase().includes("photochromic") || titel.toLowerCase().includes("photochromatisch")) ? "ja" : "nee",
@@ -503,6 +541,7 @@ async function verwerk(productData) {
     "custom.gender": "unisex",
     "custom.kleur_frame": kleuren.kleurFrame,
     "custom.kleur_lens": kleuren.kleurLens,
+    "custom.lens": lensnaam,
   };
 
   // Maat toevoegen
@@ -584,7 +623,7 @@ app.post("/webhook/product-updated", async (req, res) => {
 
 app.get("/", (req, res) => {
   res.send(`
-    <h1>✅ Sportbrillenshop Helper v15</h1>
+    <h1>✅ Sportbrillenshop Helper v16</h1>
     <p>${SHOPIFY_SHOP_DOMAIN ? "✅" : "❌"} ${SHOPIFY_SHOP_DOMAIN || "niet ingesteld"}</p>
     <p>${SHOPIFY_CLIENT_ID ? "✅" : "❌"} Client ID</p>
     <p>${SHOPIFY_CLIENT_SECRET ? "✅" : "❌"} Client Secret</p>
@@ -596,7 +635,7 @@ app.get("/", (req, res) => {
 
 const POORT = process.env.PORT || 3000;
 app.listen(POORT, () => {
-  console.log(`\n🚀 v15 gestart op poort ${POORT}`);
+  console.log(`\n🚀 v16 gestart op poort ${POORT}`);
   console.log(`🏪 ${SHOPIFY_SHOP_DOMAIN || "❌ niet ingesteld"}`);
   console.log(`🔑 ${SHOPIFY_CLIENT_ID ? "✅" : "❌"}\n`);
 });
