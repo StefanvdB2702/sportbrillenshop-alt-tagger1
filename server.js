@@ -95,6 +95,55 @@ const LENSKLEUR_MAP = {
 };
 
 // ============================================================
+// BEKENDE LENSNAMEN VOOR LENSTYPE FILTER
+// ============================================================
+const BEKENDE_LENZEN = [
+  "prizm sapphire", "prizm torch", "prizm clear", "prizm garnet",
+  "prizm sage gold", "prizm rose gold", "prizm argon", "prizm persimmon",
+  "prizm 24k", "prizm iced", "prizm black", "prizm dark grey",
+  "prizm hi pink", "prizm road", "prizm trail", "prizm trail torch",
+  "prizm ruby", "prizm deep water", "prizm shallow water",
+  "prizm road jade", "prizm jade", "prizm golf", "prizm road black",
+  "prizm grey", "prizm tungsten", "prizm dark golf", "prizm field",
+  "prizm snow rose", "prizm peach", "prizm low light", "prizm mx sapphire",
+  "deep h2o", "low light", "photochromic", "clear to black",
+  "black", "grey", "warm grey", "yellow", "clear", "24k",
+  "purple multilayer mirror", "hiper red multilayer mirror", "green multilayer mirror",
+];
+
+function bepaalLenstype(titel, isSkibrilProduct) {
+  if (!titel.includes("/")) return "";
+  const naDeslash = titel.split("/").slice(1).join("/").trim();
+  let eersteLens = naDeslash.split("&")[0].trim();
+  if (!eersteLens) return "";
+
+  eersteLens = eersteLens
+    .replace(/ iridium/gi, "")
+    .replace(/ polarized/gi, "")
+    .trim();
+
+  if (isSkibrilProduct) {
+    eersteLens = eersteLens.replace(/ snow /gi, " ").replace(/ snow$/gi, "").trim();
+  }
+
+  const lensLower = eersteLens.toLowerCase().trim();
+  const isBekendelens = BEKENDE_LENZEN.some(lens => lensLower === lens || lensLower.startsWith(lens));
+  if (!isBekendelens) return "";
+
+  let lenstype = eersteLens.split(" ")
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ");
+
+  lenstype = lenstype
+    .replace(/24k/gi, "24K")
+    .replace(/Hi/gi, "Hi")
+    .replace(/Mx/gi, "MX")
+    .replace(/Hiper/gi, "HiPER");
+
+  return lenstype;
+}
+
+// ============================================================
 // LICHTDOORLAATBAARHEID SKIBRILLEN
 // ============================================================
 const SKIBRIL_MODELLEN = [
@@ -553,6 +602,7 @@ async function verwerk(productData) {
     "custom.kleur_frame": kleuren.kleurFrame,
     "custom.kleur_lens": kleuren.kleurLens,
     "custom.lens": lensnaam,
+    "custom.lenstype": bepaalLenstype(titel, isSkibrilProduct),
   };
 
   // Maat toevoegen
@@ -636,7 +686,7 @@ app.post("/webhook/product-updated", async (req, res) => {
 
 app.get("/", (req, res) => {
   res.send(`
-    <h1>✅ Sportbrillenshop Helper v18</h1>
+    <h1>✅ Sportbrillenshop Helper v20</h1>
     <p>${SHOPIFY_SHOP_DOMAIN ? "✅" : "❌"} ${SHOPIFY_SHOP_DOMAIN || "niet ingesteld"}</p>
     <p>${SHOPIFY_CLIENT_ID ? "✅" : "❌"} Client ID</p>
     <p>${SHOPIFY_CLIENT_SECRET ? "✅" : "❌"} Client Secret</p>
@@ -648,7 +698,7 @@ app.get("/", (req, res) => {
 
 const POORT = process.env.PORT || 3000;
 app.listen(POORT, () => {
-  console.log(`\n🚀 v18 gestart op poort ${POORT}`);
+  console.log(`\n🚀 v20 gestart op poort ${POORT}`);
   console.log(`🏪 ${SHOPIFY_SHOP_DOMAIN || "❌ niet ingesteld"}`);
   console.log(`🔑 ${SHOPIFY_CLIENT_ID ? "✅" : "❌"}\n`);
 });
